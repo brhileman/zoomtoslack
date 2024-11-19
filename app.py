@@ -87,6 +87,16 @@ def zoom_webhook():
             print(f"Determining Slack channel for meeting topic: '{meeting_topic}' and summary: '{meeting_summary}'")
             slack_channel = determine_slack_channel(meeting_topic, meeting_summary)
             
+            # Get channel ID
+            channel_id = get_channel_id(slack_channel)
+            if not channel_id:
+                print(f"Channel '{slack_channel}' not found.")
+                return jsonify({'message': 'Channel not found'}), 404
+            
+            # Join the Slack channel before posting
+            print(f"Joining Slack channel: {slack_channel}")
+            join_slack_channel(channel_id)
+            
             # Package information about the recording
             recording_summary = (
                 f"New Zoom recording available:\n"
@@ -100,7 +110,7 @@ def zoom_webhook():
             
             # Post the recording info into the determined Slack channel
             print(f"Posting to Slack channel: {slack_channel}")
-            post_to_slack(slack_channel, recording_summary)
+            post_to_slack(channel_id, recording_summary)
         
         return jsonify({'message': 'Event received'}), 200
     except Exception as e:
@@ -164,19 +174,24 @@ def get_slack_channels():
         response = slack_client.conversations_list()
         if response['ok']:
             channels = response['channels']
-            return [channel['name'] for channel in channels]
+            return {channel['name']: channel['id'] for channel in channels}
         else:
             print(f"Error fetching Slack channels: {response['error']}")
-            return []
+            return {}
     except SlackApiError as e:
         print(f"Error fetching Slack channels: {e.response['error']}")
-        return []
+        return {}
+
+
+def get_channel_id(channel_name):
+    channels = get_slack_channels()
+    return channels.get(channel_name.lstrip('#'))
 
 
 def determine_slack_channel(meeting_topic, meeting_summary):
     try:
         channels = get_slack_channels()
-        channels_list = ', '.join([f"#{channel}" for channel in channels])
+        channels_list = ', '.join([f"#{channel}" for channel in channels.keys()])
 
         prompt = (
             f"Based on the following meeting topic and summary, determine the most appropriate Slack channel from the list: {channels_list}.\n"
@@ -191,18 +206,29 @@ def determine_slack_channel(meeting_topic, meeting_summary):
             max_tokens=10
         )
         channel_name = response.choices[0].text.strip()
-        return channel_name if channel_name in [f"#{channel}" for channel in channels] else "#zoom-meetings"
+        return channel_name if channel_name in [f"#{channel}" for channel in channels.keys()] else "#zoom-meetings"
     except Exception as e:
         print(f"Error determining Slack channel: {e}")
         return "#zoom-meetings"
 
 
-def post_to_slack(channel, message):
+def join_slack_channel(channel_id):
+    try:
+        slack_client.conversations_join(channel=channel_id)
+        print(f"Joined Slack channel with ID: {channel_id}")
+    except SlackApiError as e:
+        if e.response['error'] == 'method_not_supported_for_channel_type':
+            print(f"Cannot join channel with ID {channel_id}. This might be a private channel.")
+        else:
+            print(f"Error joining Slack channel: {e.response['error']}")
+
+
+def post_to_slack(channel_id, message):
     try:
         # Slack Bot Token-based API call to post a message
-        print(f"Posting message to Slack channel: {channel}")
+        print(f"Posting message to Slack channel with ID: {channel_id}")
         response = slack_client.chat_postMessage(
-            channel=channel,
+            channel=channel_id,
             text=message
         )
         print(f"Message posted to Slack: {response['ts']}")
