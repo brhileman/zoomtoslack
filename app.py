@@ -99,13 +99,14 @@ def zoom_webhook():
             
             # Package information about the recording
             recording_summary = (
-                f"New Zoom recording available:\n"
-                f"Meeting Topic: {meeting_topic}\n"
-                f"Meeting ID: {meeting_id}\n"
-                f"Host: {host_email}\n"
-                f"Share URL: {share_url}\n"
-                f"Share Code: {share_code}\n"
-                f"Meeting Summary: {meeting_summary}\n"
+                f"Meeting Summary for {meeting_topic}\n"
+                f"{recording_info.get('start_time', 'Date Not Available')} ID: {meeting_id}\n"
+                f"Quick recap\n\n"
+                f"{meeting_summary}\n\n"
+                f"Next steps\n\n"
+                f"TBD\n\n"
+                f"Summary\n\n"
+                f"{meeting_summary}\n"
             )
             
             # Post the recording info into the determined Slack channel
@@ -204,12 +205,14 @@ def determine_slack_channel(meeting_topic, meeting_summary):
             f"Provide only the channel name, such as #general or #team-updates."
         )
         print(f"Sending prompt to OpenAI to determine Slack channel")
-        response = openai.Completion.create(
-            engine="text-davinci-003",
-            prompt=prompt,
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
             max_tokens=10
         )
-        channel_name = response.choices[0].text.strip()
+        channel_name = response.choices[0].message['content'].strip()
         return channel_name if channel_name in [f"#{channel}" for channel in channels.keys()] else "#zoom-meetings"
     except Exception as e:
         print(f"Error determining Slack channel: {e}")
