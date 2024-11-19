@@ -80,6 +80,9 @@ def zoom_webhook():
         print(f"Error processing webhook: {e}")
         return jsonify({'message': 'Internal Server Error'}), 500
 
+@app.route('/', methods=['GET'])
+def index():
+    return "The Zoom to Slack integration app is running successfully!", 200
 
 def get_access_token():
     try:
