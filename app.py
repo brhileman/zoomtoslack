@@ -17,6 +17,7 @@ app = Flask(__name__)
 # Load tokens and keys from environment variables
 SLACK_BOT_TOKEN = os.getenv('SLACK_BOT_TOKEN')
 ZOOM_WEBHOOK_SECRET_TOKEN = os.getenv('ZOOM_WEBHOOK_SECRET_TOKEN')
+ZOOM_VERIFICATION_TOKEN = os.getenv('ZOOM_VERIFICATION_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 ZOOM_CLIENT_ID = os.getenv('ZOOM_CLIENT_ID')
 ZOOM_CLIENT_SECRET = os.getenv('ZOOM_CLIENT_SECRET')
@@ -37,9 +38,9 @@ def zoom_webhook():
             print(f"Zoom URL validation: Received plainToken={plain_token}")
             return plain_token, 200
         
-        # Verify the webhook secret token
-        if data.get('token') != ZOOM_WEBHOOK_SECRET_TOKEN:
-            print("Unauthorized request: Token does not match.")
+        # Verify the verification token
+        if data.get('token') != ZOOM_VERIFICATION_TOKEN:
+            print("Unauthorized request: Verification token does not match.")
             return jsonify({'message': 'Unauthorized'}), 401
         
         # Handle "Recording Completed" event
