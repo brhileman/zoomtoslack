@@ -35,9 +35,9 @@ def zoom_webhook():
 
         # Handle URL validation event
         if data.get('event') == 'endpoint.url_validation':
-            plain_token = data['payload']['plainToken']
-            print(f"Zoom URL validation: Received plainToken={plain_token}")
-            return plain_token, 200
+    plain_token = data['payload']['plainToken']
+    print(f"Zoom URL validation: Received plainToken={plain_token}")
+    return jsonify({"plainToken": plain_token}), 200
         
         # Verify the verification token
         if data.get('token') != ZOOM_VERIFICATION_TOKEN:
