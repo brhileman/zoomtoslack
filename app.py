@@ -18,7 +18,6 @@ app = Flask(__name__)
 # Load tokens and keys from environment variables
 SLACK_BOT_TOKEN = os.getenv('SLACK_BOT_TOKEN')
 ZOOM_WEBHOOK_SECRET_TOKEN = os.getenv('ZOOM_WEBHOOK_SECRET_TOKEN')
-ZOOM_VERIFICATION_TOKEN = os.getenv('ZOOM_VERIFICATION_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 ZOOM_CLIENT_ID = os.getenv('ZOOM_CLIENT_ID')
 ZOOM_CLIENT_SECRET = os.getenv('ZOOM_CLIENT_SECRET')
@@ -33,16 +32,37 @@ def zoom_webhook():
         # Parse incoming JSON request
         data = request.json
 
+        # Extract headers for verification
+        zoom_signature = request.headers.get('x-zm-signature')
+        zoom_timestamp = request.headers.get('x-zm-request-timestamp')
+
+        # Validate the request is from Zoom
+        message = f'v0:{zoom_timestamp}:{json.dumps(data)}'
+        hash_for_verify = hmac.new(
+            ZOOM_WEBHOOK_SECRET_TOKEN.encode(),
+            message.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        expected_signature = f'v0={hash_for_verify}'
+
+        if zoom_signature != expected_signature:
+            print("Unauthorized request: Signature does not match.")
+            return jsonify({'message': 'Unauthorized'}), 401
+
         # Handle URL validation event
         if data.get('event') == 'endpoint.url_validation':
             plain_token = data['payload']['plainToken']
+            hash_for_validate = hmac.new(
+                ZOOM_WEBHOOK_SECRET_TOKEN.encode(),
+                plain_token.encode(),
+                hashlib.sha256
+            ).hexdigest()
+            response = {
+                "plainToken": plain_token,
+                "encryptedToken": hash_for_validate
+            }
             print(f"Zoom URL validation: Received plainToken={plain_token}")
-            return jsonify({"plainToken": plain_token}), 200
-        
-        # Verify the verification token
-        if data.get('token') != ZOOM_VERIFICATION_TOKEN:
-            print("Unauthorized request: Verification token does not match.")
-            return jsonify({'message': 'Unauthorized'}), 401
+            return jsonify(response), 200
         
         # Handle "Recording Completed" event
         if data.get('event') == 'recording.completed':
