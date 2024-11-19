@@ -3,6 +3,7 @@ import json
 import requests
 import hmac
 import hashlib
+import base64  # Added missing import
 from flask import Flask, request, jsonify
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -184,5 +185,6 @@ def post_to_slack(channel, message):
 
 
 if __name__ == '__main__':
-    # Run the Flask app
-    app.run(port=5000, debug=True)
+    # Get the port from the environment variable and run the Flask app
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
