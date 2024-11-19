@@ -4,6 +4,7 @@ import requests
 import hmac
 import hashlib
 import base64
+import time
 from flask import Flask, request, jsonify
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -36,8 +37,13 @@ def zoom_webhook():
         zoom_signature = request.headers.get('x-zm-signature')
         zoom_timestamp = request.headers.get('x-zm-request-timestamp')
 
+        # Check if the timestamp is within 5 minutes of current time to prevent replay attacks
+        if abs(time.time() - int(zoom_timestamp)) > 300:
+            print("Unauthorized request: Timestamp is too old.")
+            return jsonify({'message': 'Unauthorized'}), 401
+
         # Validate the request is from Zoom
-        message = f'v0:{zoom_timestamp}:{json.dumps(data)}'
+        message = f'v0:{zoom_timestamp}:{json.dumps(data, separators=(",", ":"))}'
         hash_for_verify = hmac.new(
             ZOOM_WEBHOOK_SECRET_TOKEN.encode(),
             message.encode(),
