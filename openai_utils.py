@@ -1,6 +1,8 @@
 import openai
 import os
 from dotenv import load_dotenv
+from slack_utils import get_slack_channels
+
 
 # Load environment variables from .env file
 load_dotenv()

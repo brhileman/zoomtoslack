@@ -54,8 +54,9 @@ def get_meeting_summary(meeting_id):
         if not access_token:
             return {}
 
-        if '/' in meeting_id:
-            meeting_id = requests.utils.quote(requests.utils.quote(meeting_id, safe=''), safe='')
+        if '/' in str(meeting_id):
+            meeting_id = requests.utils.quote(requests.utils.quote(str(meeting_id), safe=''), safe='')
+
 
         url = f"https://api.zoom.us/v2/meetings/{meeting_id}/meeting_summary"
         headers = {
