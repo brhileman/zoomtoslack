@@ -26,15 +26,19 @@ def get_channel_id(channel_name):
     channels = get_slack_channels()
     return channels.get(channel_name.lstrip('#'))
 
-def join_slack_channel(channel_id):
+def join_slack_channel(channel_name):
+    channel_id = get_channel_id(channel_name)
+    if not channel_id:
+        print(f"Channel '{channel_name}' not found.")
+        return None
+
     try:
         slack_client.conversations_join(channel=channel_id)
-        print(f"Joined Slack channel with ID: {channel_id}")
+        print(f"Joined Slack channel: {channel_name}")
+        return channel_id
     except SlackApiError as e:
-        if e.response['error'] == 'method_not_supported_for_channel_type':
-            print(f"Cannot join channel with ID {channel_id}. This might be a private channel.")
-        else:
-            print(f"Error joining Slack channel: {e.response['error']}")
+        print(f"Error joining Slack channel: {e.response['error']}")
+        return None
 
 def post_to_slack(channel_id, message):
     try:
@@ -42,3 +46,4 @@ def post_to_slack(channel_id, message):
         print(f"Message posted to Slack: {response['ts']}")
     except SlackApiError as e:
         print(f"Error posting to Slack: {e.response['error']}")
+

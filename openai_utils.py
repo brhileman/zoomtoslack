@@ -3,7 +3,6 @@ import os
 from dotenv import load_dotenv
 from slack_utils import get_slack_channels
 
-
 # Load environment variables from .env file
 load_dotenv()
 
@@ -21,13 +20,18 @@ def determine_slack_channel(meeting_topic, meeting_summary):
             f"Meeting Summary: {meeting_summary.get('summary_overview', 'No overview available.')}\n"
             f"Provide only the channel name, such as #general or #team-updates."
         )
+
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=10
         )
-        channel_name = response.choices[0].message['content'].strip()
+        channel_name = response.choices[0].message.content.strip()
         return channel_name if channel_name in [f"#{channel}" for channel in channels.keys()] else "#zoom-meetings"
     except Exception as e:
-        print(f"Error determining Slack channel: {e}")
-        return "#zoom-meetings"
+        if "insufficient_quota" in str(e):
+            print("Quota exceeded, using mocked response.")
+            return "#zoom-meetings"
+        else:
+            print(f"Error determining Slack channel: {e}")
+            return "#zoom-meetings"
