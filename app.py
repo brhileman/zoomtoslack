@@ -1,5 +1,4 @@
 import os
-import time
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from zoom_utils import validate_zoom_request, get_meeting_summary
@@ -16,6 +15,7 @@ ZOOM_WEBHOOK_SECRET_TOKEN = os.getenv('ZOOM_WEBHOOK_SECRET_TOKEN')
 @app.route('/zoom-webhook', methods=['POST'])
 def zoom_webhook():
     try:
+        import time
         data = request.json
         if not data:
             return jsonify({'message': 'Invalid request: No data provided'}), 400
