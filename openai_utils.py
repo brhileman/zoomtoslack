@@ -36,6 +36,36 @@ def transcribe_audio(file_path):
         logger.exception(f"Error transcribing audio: {e}")
         return ""
 
+def determine_slack_channel(meeting_topic, meeting_summary):
+    """
+    Determines the appropriate Slack channel to post the meeting summary to using OpenAI's ChatCompletion API.
+    Returns the Slack channel name as a string.
+    """
+    try:
+        prompt = (
+            "Based on the meeting topic and summary overview, determine the most appropriate public Slack channel to post the meeting summary to.\n\n"
+            f"Meeting Topic: {meeting_topic}\n"
+            f"Summary Overview: {meeting_summary.get('summary_overview', '')}\n\n"
+            "Provide only the Slack channel name (e.g., general, product-team). If unsure, suggest 'general'."
+        )
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that categorizes information into public Slack channels."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=10,
+            temperature=0.3,
+            n=1,
+            stop=["\n"]
+        )
+        channel_name = response.choices[0].message['content'].strip().lower()
+        logger.info(f"Determined Slack channel: {channel_name}")
+        return channel_name
+    except Exception as e:
+        logger.exception(f"Error determining Slack channel: {e}")
+        return "general"
+
 def generate_summary(transcript, meeting_title, host_email, meeting_id, meeting_date, meeting_time, participants, duration):
     """
     Generates a structured summary from the transcript using OpenAI's ChatCompletion API.
@@ -102,6 +132,7 @@ def generate_summary(transcript, meeting_title, host_email, meeting_id, meeting_
         # Simple parsing logic based on section headers
         lines = summary_text.split('\n')
         current_section = None
+        current_subsection = None
         for line in lines:
             line = line.strip()
             if line.startswith("1. **Meeting Title & Basic Details:**"):
@@ -164,33 +195,6 @@ def generate_summary(transcript, meeting_title, host_email, meeting_id, meeting_
                 "action_items": action_items.strip()
             }
         }
-
-def determine_slack_channel(meeting_topic, meeting_summary):
-    """
-    Determines the appropriate Slack channel to post the meeting summary to using OpenAI's ChatCompletion API.
-    Returns the Slack channel name as a string.
-    """
-    try:
-        prompt = (
-            "Based on the meeting topic and summary overview, determine the most appropriate public Slack channel to post the meeting summary to.\n\n"
-            f"Meeting Topic: {meeting_topic}\n"
-            f"Summary Overview: {meeting_summary.get('summary_overview', '')}\n\n"
-            "Provide only the Slack channel name (e.g., general, product-team). If unsure, suggest 'general'."
-        )
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that categorizes information into public Slack channels."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=10,
-            temperature=0.3,
-            n=1,
-            stop=["\n"]
-        )
-        channel_name = response.choices[0].message['content'].strip().lower()
-        logger.info(f"Determined Slack channel: {channel_name}")
-        return channel_name
     except Exception as e:
-        logger.exception(f"Error determining Slack channel: {e}")
-        return "general"
+        logger.exception(f"Error generating summary: {e}")
+        return {}

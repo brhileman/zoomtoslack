@@ -88,7 +88,7 @@ def zoom_webhook():
             share_url = recording_info.get('share_url', "")
             if not recording_url:
                 logger.error("Recording URL not found.")
-                return jsonify({'message': 'Recording URL not available.'}), 400
+                return jsonify({'message': 'Recording URL is not available.'}), 400
 
             # Extract download_token from the webhook payload
             download_token = data.get('download_token', "")
@@ -219,15 +219,19 @@ def zoom_webhook():
             except Exception as e:
                 logger.warning(f"Failed to remove temporary file: {recording_file_path}. Error: {e}")
 
-        return jsonify({'message': 'Event received'}), 200
+    except Exception as e:
+        logger.exception(f"Error processing Zoom webhook: {e}")
+        return jsonify({'message': 'Internal server error.'}), 500
 
-    @app.route('/', methods=['GET'])
-    def index():
-        return "The Zoom to Slack integration app is running successfully!", 200
+    return jsonify({'message': 'Event received'}), 200
 
-    if __name__ == '__main__':
-        try:
-            port = int(os.environ.get("PORT", 5000))
-            app.run(host="0.0.0.0", port=port, debug=False)
-        except Exception as e:
-            logger.exception(f"Failed to start the Flask app: {e}")
+@app.route('/', methods=['GET'])
+def index():
+    return "The Zoom to Slack integration app is running successfully!", 200
+
+if __name__ == '__main__':
+    try:
+        port = int(os.environ.get("PORT", 5000))
+        app.run(host="0.0.0.0", port=port, debug=False)
+    except Exception as e:
+        logger.exception(f"Failed to start the Flask app: {e}")
