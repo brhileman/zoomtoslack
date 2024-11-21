@@ -1,3 +1,5 @@
+# zoom_utils.py
+
 import os
 import time
 import json
@@ -7,6 +9,7 @@ import base64
 import requests
 import logging
 from dotenv import load_dotenv
+import tempfile
 
 # Load environment variables from .env file only if not on Heroku
 if os.getenv('DYNO') is None:
@@ -41,6 +44,9 @@ if missing_vars:
     raise EnvironmentError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
 def validate_zoom_request(secret_token, zoom_signature, zoom_timestamp, data):
+    """
+    Validates the incoming Zoom webhook request.
+    """
     try:
         # Check timestamp to prevent replay attacks
         if abs(time.time() - int(zoom_timestamp)) > 300:
@@ -65,6 +71,9 @@ def validate_zoom_request(secret_token, zoom_signature, zoom_timestamp, data):
         return False
 
 def get_access_token():
+    """
+    Retrieves an OAuth access token from Zoom.
+    """
     try:
         url = "https://zoom.us/oauth/token"
         params = {
@@ -89,34 +98,87 @@ def get_access_token():
         logger.exception(f"Error fetching access token: {e}")
         return None
 
-def get_meeting_summary(meeting_id):
+def get_meeting_recordings(meeting_id):
+    """
+    Retrieves recordings for a given meeting ID.
+    Returns a tuple of (recording_files, recording_play_passcode).
+    """
     try:
         access_token = get_access_token()
         if not access_token:
-            logger.error("Cannot fetch meeting summary without access token.")
-            return {}
+            logger.error("Cannot fetch recordings without access token.")
+            return [], None
 
-        # Encode meeting_id if necessary
-        if '/' in str(meeting_id):
-            meeting_id = requests.utils.quote(requests.utils.quote(str(meeting_id), safe=''), safe='')
-
-        url = f"https://api.zoom.us/v2/meetings/{meeting_id}/meeting_summary"
+        url = f"https://api.zoom.us/v2/meetings/{meeting_id}/recordings"
         headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
+            "Authorization": f"Bearer {access_token}"
         }
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
-            summary_data = response.json()
-            logger.info(f"Fetched meeting summary for Meeting ID: {meeting_id}")
-            return {
-                "summary_overview": summary_data.get('summary_overview', 'No overview available.'),
-                "next_steps": summary_data.get('next_steps', []),
-                "summary_details": summary_data.get('summary_details', 'No detailed summary available.')
-            }
+            recordings_data = response.json()
+            recording_files = recordings_data.get('recording_files', [])
+            recording_play_passcode = recordings_data.get('recording_play_passcode', "")
+            logger.info(f"Fetched {len(recording_files)} recordings for Meeting ID: {meeting_id}")
+            return recording_files, recording_play_passcode
         else:
-            logger.error(f"Error fetching meeting summary: {response.status_code} {response.text}")
-            return {}
+            logger.error(f"Error fetching recordings: {response.status_code} {response.text}")
+            return [], None
     except Exception as e:
-        logger.exception(f"Error fetching meeting summary: {e}")
-        return {}
+        logger.exception(f"Error fetching recordings: {e}")
+        return [], None
+
+def download_recording(recording_url, download_token):
+    """
+    Downloads the recording from Zoom and saves it locally.
+    Returns the file path if successful, else None.
+    """
+    try:
+        headers = {
+            "Authorization": f"Bearer {download_token}"
+        }
+        response = requests.get(recording_url, headers=headers, stream=True)
+        if response.status_code == 200:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_file:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        temp_file.write(chunk)
+                temp_file_path = temp_file.name
+            logger.info(f"Recording downloaded successfully: {temp_file_path}")
+            return temp_file_path
+        else:
+            logger.error(f"Error downloading recording: {response.status_code} {response.text}")
+            return None
+    except Exception as e:
+        logger.exception(f"Error downloading recording: {e}")
+        return None
+
+def get_meeting_participants(meeting_id):
+    """
+    Retrieves participants for a given meeting ID.
+    Returns a list of participant emails.
+    """
+    try:
+        access_token = get_access_token()
+        if not access_token:
+            logger.error("Cannot fetch participants without access token.")
+            return []
+
+        url = f"https://api.zoom.us/v2/meetings/{meeting_id}/participants"
+        headers = {
+            "Authorization": f"Bearer {access_token}"
+        }
+        params = {
+            "page_size": 300  # Adjust as needed based on expected participant count
+        }
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code == 200:
+            participants_data = response.json()
+            participants = [participant.get('email', 'Unknown Email') for participant in participants.get('participants', [])]
+            logger.info(f"Fetched {len(participants)} participants for Meeting ID: {meeting_id}")
+            return participants
+        else:
+            logger.error(f"Error fetching participants: {response.status_code} {response.text}")
+            return []
+    except Exception as e:
+        logger.exception(f"Error fetching participants: {e}")
+        return []
