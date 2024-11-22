@@ -66,6 +66,7 @@ def zoom_webhook():
 
         # Reconstruct the payload as a JSON string without spaces
         payload = json.dumps(data, separators=(',', ':'))
+        print(payload)
 
         # Validate request from Zoom
         if not validate_zoom_webhook(ZOOM_WEBHOOK_SECRET_TOKEN, zoom_signature, zoom_timestamp, payload):
@@ -74,7 +75,7 @@ def zoom_webhook():
 
         event = data.get('event')
         if event == 'recording.completed':
-            print(event)
+
             recording_info = data['payload']['object']
             meeting_topic = recording_info.get('topic', 'No topic')
             meeting_id = str(recording_info.get('id'))  # Ensure it's string
