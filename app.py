@@ -6,10 +6,9 @@ from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from zoom_utils import (
     validate_zoom_webhook,
-    get_meeting_recordings,
     download_recording,
     get_meeting_participants,
-    get_zoom_headers
+    get_zoom_headers  # This may not be needed anymore
 )
 from slack_utils import get_channel_id, ensure_default_channel_exists, post_to_slack
 from openai_utils import (
@@ -65,7 +64,7 @@ def zoom_webhook():
             logger.warning("Invalid request: Missing signature or timestamp headers.")
             return jsonify({'message': 'Invalid request: Missing signature or timestamp headers.'}), 400
 
-        # Reconstruct the payload as a JSON string
+        # Reconstruct the payload as a JSON string without spaces
         payload = json.dumps(data, separators=(',', ':'))
 
         # Validate request from Zoom
@@ -87,26 +86,26 @@ def zoom_webhook():
 
             logger.info(f"Processing recording.completed event for Meeting ID: {meeting_id}")
 
-            # Fetch recordings from Zoom
-            recordings, recording_play_passcode = get_meeting_recordings(meeting_id)
-            if not recordings:
-                logger.warning(f"No recordings found for Meeting ID: {meeting_id}")
-                return jsonify({'message': 'No recordings available.'}), 200
+            # Extract download_url and download_token directly from the webhook payload
+            # Depending on Zoom's webhook payload structure, adjust the keys accordingly
+            # Here's an example based on typical Zoom webhook payloads
+            recording_files = recording_info.get('recording_files', [])
+            if not recording_files:
+                logger.warning(f"No recordings found in webhook payload for Meeting ID: {meeting_id}")
+                return jsonify({'message': 'No recordings available in payload.'}), 200
 
-            # Assume the first recording is the desired one (modify as needed)
-            recording = recordings[0]
-            recording_url = recording.get('download_url')
-            play_url = recording.get('play_url', "")
-            share_url = recording_info.get('share_url', "")
-            if not recording_url:
-                logger.error("Recording URL not found.")
-                return jsonify({'message': 'Recording URL is not available.'}), 400
+            # Iterate through recording files to find the desired one (e.g., video)
+            recording_url = None
+            download_token = None
+            for file in recording_files:
+                if file.get('file_type') == 'MP4':  # Adjust as needed
+                    recording_url = file.get('download_url')
+                    download_token = file.get('download_token')
+                    break
 
-            # Extract download_token from the webhook payload
-            download_token = data.get('download_token', "")
-            if not download_token:
-                logger.error("Download token not found in the webhook payload.")
-                return jsonify({'message': 'Download token is missing.'}), 400
+            if not recording_url or not download_token:
+                logger.error("Recording URL or download token not found in webhook payload.")
+                return jsonify({'message': 'Recording URL or download token is missing.'}), 400
 
             # Additional Meeting Details
             start_time = recording_info.get('start_time', 'Unknown DateTime')
@@ -175,8 +174,8 @@ def zoom_webhook():
 
             # Incorporate Share Details (Play URL and Password)
             share_details = {
-                "play_url": play_url if play_url else "No play URL available.",
-                "password": recording_play_passcode if recording_play_passcode else "No password available."
+                "play_url": recording_url,
+                "password": recording_info.get('play_passcode', 'No password available.')
             }
 
             # Update share_details in meeting_summary

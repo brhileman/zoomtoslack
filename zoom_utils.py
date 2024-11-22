@@ -111,30 +111,6 @@ def validate_zoom_webhook(signing_secret, signature, timestamp, payload):
         logger.exception(f"Error during Zoom webhook validation: {e}")
         return False
 
-def get_meeting_recordings(meeting_id):
-    """
-    Fetches recordings for a specific meeting.
-    """
-    try:
-        user_id = "me"  # 'me' refers to the authenticated user
-        url = f"{ZOOM_API_BASE_URL}/users/{user_id}/recordings"
-        params = {
-            "meeting_id": meeting_id
-        }
-        response = requests.get(url, headers=get_zoom_headers(), params=params)
-        response.raise_for_status()
-        data = response.json()
-        recordings = data.get('recording_files', [])
-        play_passcode = data.get('play_passcode', '')
-        logger.info(f"Fetched {len(recordings)} recordings for Meeting ID: {meeting_id}")
-        return recordings, play_passcode
-    except requests.exceptions.HTTPError as http_err:
-        logger.error(f"HTTP error occurred: {http_err} - {response.text}")
-        return None, None
-    except Exception as e:
-        logger.exception(f"Unexpected error fetching recordings: {e}")
-        return None, None
-
 def get_meeting_participants(meeting_id):
     """
     Fetches participants for a specific past meeting.
