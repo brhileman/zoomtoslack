@@ -68,7 +68,7 @@ def zoom_webhook():
         if event == 'recording.completed':
             recording_info = data['payload']['object']
             meeting_topic = recording_info.get('topic', 'No topic')
-            meeting_id = recording_info.get('id')  # Numeric ID
+            meeting_id = str(recording_info.get('id'))  # Ensure it's string
             meeting_uuid = recording_info.get('uuid')  # UUID
             host_email = recording_info.get('host_email', 'No host email provided')
 
