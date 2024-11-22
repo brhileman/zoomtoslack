@@ -5,10 +5,11 @@ import logging
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from zoom_utils import (
-    validate_zoom_request,
+    validate_zoom_webhook,
     get_meeting_recordings,
     download_recording,
-    get_meeting_participants
+    get_meeting_participants,
+    get_zoom_headers
 )
 from slack_utils import get_channel_id, ensure_default_channel_exists, post_to_slack
 from openai_utils import (
@@ -19,6 +20,7 @@ from openai_utils import (
 import requests
 import openai
 import tempfile
+import json
 
 # Define the default Slack channel name
 DEFAULT_CHANNEL_NAME = "bot-lost-meeting-recordings"
@@ -51,7 +53,7 @@ if not ZOOM_WEBHOOK_SECRET_TOKEN:
 @app.route('/zoom-webhook', methods=['POST'])
 def zoom_webhook():
     try:
-        data = request.json
+        data = request.get_json()
         if not data:
             logger.warning("Invalid request: No data provided.")
             return jsonify({'message': 'Invalid request: No data provided'}), 400
@@ -59,8 +61,15 @@ def zoom_webhook():
         zoom_signature = request.headers.get('x-zm-signature')
         zoom_timestamp = request.headers.get('x-zm-request-timestamp')
 
+        if not zoom_signature or not zoom_timestamp:
+            logger.warning("Invalid request: Missing signature or timestamp headers.")
+            return jsonify({'message': 'Invalid request: Missing signature or timestamp headers.'}), 400
+
+        # Reconstruct the payload as a JSON string
+        payload = json.dumps(data, separators=(',', ':'))
+
         # Validate request from Zoom
-        if not validate_zoom_request(ZOOM_WEBHOOK_SECRET_TOKEN, zoom_signature, zoom_timestamp, data):
+        if not validate_zoom_webhook(ZOOM_WEBHOOK_SECRET_TOKEN, zoom_signature, zoom_timestamp, payload):
             logger.warning("Unauthorized request: Validation failed.")
             return jsonify({'message': 'Unauthorized'}), 401
 
@@ -79,13 +88,13 @@ def zoom_webhook():
             logger.info(f"Processing recording.completed event for Meeting ID: {meeting_id}")
 
             # Fetch recordings from Zoom
-            recording_files, recording_play_passcode = get_meeting_recordings(meeting_id)
-            if not recording_files:
+            recordings, recording_play_passcode = get_meeting_recordings(meeting_id)
+            if not recordings:
                 logger.warning(f"No recordings found for Meeting ID: {meeting_id}")
                 return jsonify({'message': 'No recordings available.'}), 200
 
             # Assume the first recording is the desired one (modify as needed)
-            recording = recording_files[0]
+            recording = recordings[0]
             recording_url = recording.get('download_url')
             play_url = recording.get('play_url', "")
             share_url = recording_info.get('share_url', "")
@@ -109,8 +118,12 @@ def zoom_webhook():
                 meeting_time = "Unknown Time"
 
             # Handle participants extraction
-            participants = get_meeting_participants(meeting_id)
-            if not participants:
+            participants_data = get_meeting_participants(meeting_id)
+            if participants_data:
+                participants = [participant['user_email'] for participant in participants_data if participant.get('user_email')]
+                if not participants:
+                    participants = ["Unknown Participant"]
+            else:
                 participants = ["Unknown Participant"]
 
             duration = recording_info.get('duration', 'Unknown Duration')

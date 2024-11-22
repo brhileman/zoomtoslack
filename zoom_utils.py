@@ -5,21 +5,69 @@ import logging
 import requests
 import tempfile
 import urllib.parse
+import base64
+import time
 
 logger = logging.getLogger(__name__)
 
 ZOOM_API_BASE_URL = "https://api.zoom.us/v2"
 
-# Server-to-Server OAuth Access Token
-ZOOM_OAUTH_ACCESS_TOKEN = os.getenv('ZOOM_OAUTH_ACCESS_TOKEN')  # Ensure this is set and valid
+# Server-to-Server OAuth Credentials
+ZOOM_CLIENT_ID = os.getenv('ZOOM_CLIENT_ID')
+ZOOM_CLIENT_SECRET = os.getenv('ZOOM_CLIENT_SECRET')
 
-if not ZOOM_OAUTH_ACCESS_TOKEN:
-    logger.error("ZOOM_OAUTH_ACCESS_TOKEN is not set in environment variables.")
-    raise EnvironmentError("ZOOM_OAUTH_ACCESS_TOKEN is required.")
+if not ZOOM_CLIENT_ID or not ZOOM_CLIENT_SECRET:
+    logger.error("ZOOM_CLIENT_ID and ZOOM_CLIENT_SECRET must be set in environment variables.")
+    raise EnvironmentError("ZOOM_CLIENT_ID and ZOOM_CLIENT_SECRET are required.")
+
+def obtain_zoom_access_token():
+    """
+    Obtains a new OAuth access token using Client Credentials Grant.
+    """
+    try:
+        url = "https://zoom.us/oauth/token"
+        headers = {
+            "Authorization": f"Basic {base64.b64encode(f'{ZOOM_CLIENT_ID}:{ZOOM_CLIENT_SECRET}'.encode()).decode()}",
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        data = {
+            "grant_type": "client_credentials"
+        }
+        response = requests.post(url, headers=headers, data=data)
+        response.raise_for_status()
+        token_info = response.json()
+        access_token = token_info.get('access_token')
+        expires_in = token_info.get('expires_in')  # seconds
+        logger.info("Obtained new Zoom OAuth access token.")
+        return access_token, expires_in
+    except requests.exceptions.HTTPError as http_err:
+        logger.error(f"HTTP error occurred while obtaining access token: {http_err} - {response.text}")
+        return None, None
+    except Exception as e:
+        logger.exception(f"Unexpected error obtaining access token: {e}")
+        return None, None
+
+# Token Management
+ZOOM_ACCESS_TOKEN = None
+ZOOM_TOKEN_EXPIRY = 0  # Unix timestamp
+
+def get_valid_zoom_access_token():
+    global ZOOM_ACCESS_TOKEN, ZOOM_TOKEN_EXPIRY
+    current_time = int(time.time())
+    if not ZOOM_ACCESS_TOKEN or current_time >= ZOOM_TOKEN_EXPIRY:
+        access_token, expires_in = obtain_zoom_access_token()
+        if access_token:
+            ZOOM_ACCESS_TOKEN = access_token
+            ZOOM_TOKEN_EXPIRY = current_time + expires_in - 60  # Refresh 1 minute before expiry
+    return ZOOM_ACCESS_TOKEN
 
 def get_zoom_headers():
+    access_token = get_valid_zoom_access_token()
+    if not access_token:
+        logger.error("Unable to obtain valid Zoom access token.")
+        raise EnvironmentError("Zoom access token is required.")
     return {
-        "Authorization": f"Bearer {ZOOM_OAUTH_ACCESS_TOKEN}",
+        "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"
     }
 
