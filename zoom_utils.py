@@ -7,6 +7,9 @@ import tempfile
 import urllib.parse
 import base64
 import time
+import hmac
+import hashlib
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +29,10 @@ def obtain_zoom_access_token():
     """
     try:
         url = "https://zoom.us/oauth/token"
+        credentials = f"{ZOOM_CLIENT_ID}:{ZOOM_CLIENT_SECRET}"
+        encoded_credentials = base64.b64encode(credentials.encode()).decode()
         headers = {
-            "Authorization": f"Basic {base64.b64encode(f'{ZOOM_CLIENT_ID}:{ZOOM_CLIENT_SECRET}'.encode()).decode()}",
+            "Authorization": f"Basic {encoded_credentials}",
             "Content-Type": "application/x-www-form-urlencoded"
         }
         data = {
@@ -70,6 +75,41 @@ def get_zoom_headers():
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"
     }
+
+def validate_zoom_webhook(signing_secret, signature, timestamp, payload):
+    """
+    Validates Zoom webhook signatures to ensure authenticity.
+    
+    Parameters:
+        signing_secret (str): The webhook secret token from Zoom.
+        signature (str): The signature from the 'x-zm-signature' header.
+        timestamp (str): The timestamp from the 'x-zm-request-timestamp' header.
+        payload (str): The raw request body as a JSON string.
+    
+    Returns:
+        bool: True if the signature is valid, False otherwise.
+    """
+    try:
+        # Construct the message as per Zoom's specifications
+        message = f"v0:{timestamp}:{payload}"
+        # Create HMAC SHA256 hash using the signing secret
+        hash_digest = hmac.new(
+            signing_secret.encode('utf-8'),
+            message.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        # Prepend 'v0=' to the hash to form the expected signature
+        expected_signature = f"v0={hash_digest}"
+        # Compare the expected signature with the received signature
+        is_valid = hmac.compare_digest(expected_signature, signature)
+        if is_valid:
+            logger.info("Zoom webhook signature validated successfully.")
+        else:
+            logger.warning("Zoom webhook signature validation failed.")
+        return is_valid
+    except Exception as e:
+        logger.exception(f"Error during Zoom webhook validation: {e}")
+        return False
 
 def get_meeting_recordings(meeting_id):
     """
