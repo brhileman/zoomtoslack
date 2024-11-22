@@ -7,8 +7,7 @@ from dotenv import load_dotenv
 from zoom_utils import (
     validate_zoom_webhook,
     download_recording,
-    get_meeting_participants,
-    get_zoom_headers  # This may not be needed anymore
+    get_meeting_participants
 )
 from slack_utils import get_channel_id, ensure_default_channel_exists, post_to_slack
 from openai_utils import (
@@ -16,9 +15,6 @@ from openai_utils import (
     generate_summary,
     determine_slack_channel
 )
-import requests
-import openai
-import tempfile
 import json
 
 # Define the default Slack channel name
@@ -66,7 +62,6 @@ def zoom_webhook():
 
         # Reconstruct the payload as a JSON string without spaces
         payload = json.dumps(data, separators=(',', ':'))
-        print(payload)
 
         # Validate request from Zoom
         if not validate_zoom_webhook(ZOOM_WEBHOOK_SECRET_TOKEN, zoom_signature, zoom_timestamp, payload):
@@ -75,7 +70,6 @@ def zoom_webhook():
 
         event = data.get('event')
         if event == 'recording.completed':
-
             recording_info = data['payload']['object']
             meeting_topic = recording_info.get('topic', 'No topic')
             meeting_id = str(recording_info.get('id'))  # Ensure it's string
@@ -88,26 +82,28 @@ def zoom_webhook():
 
             logger.info(f"Processing recording.completed event for Meeting ID: {meeting_id}")
 
-            # Extract download_url and download_token directly from the webhook payload
-            # Depending on Zoom's webhook payload structure, adjust the keys accordingly
-            # Here's an example based on typical Zoom webhook payloads
+            # Extract download_token from top-level
+            download_token = data.get('download_token', "")
+            if not download_token:
+                logger.error("Download token not found in webhook payload.")
+                return jsonify({'message': 'Download token is missing.'}), 400
+
+            # Extract recording_files from payload
             recording_files = recording_info.get('recording_files', [])
             if not recording_files:
                 logger.warning(f"No recordings found in webhook payload for Meeting ID: {meeting_id}")
                 return jsonify({'message': 'No recordings available in payload.'}), 200
 
-            # Iterate through recording files to find the desired one (e.g., video)
+            # Iterate through recording files to find the desired one (e.g., MP4)
             recording_url = None
-            download_token = None
             for file in recording_files:
                 if file.get('file_type') == 'MP4':  # Adjust as needed
                     recording_url = file.get('download_url')
-                    download_token = file.get('download_token')
                     break
 
-            if not recording_url or not download_token:
-                logger.error("Recording URL or download token not found in webhook payload.")
-                return jsonify({'message': 'Recording URL or download token is missing.'}), 400
+            if not recording_url:
+                logger.error("Recording URL not found in webhook payload.")
+                return jsonify({'message': 'Recording URL is missing.'}), 400
 
             # Additional Meeting Details
             start_time = recording_info.get('start_time', 'Unknown DateTime')
@@ -177,7 +173,7 @@ def zoom_webhook():
             # Incorporate Share Details (Play URL and Password)
             share_details = {
                 "play_url": recording_url,
-                "password": recording_info.get('play_passcode', 'No password available.')
+                "password": recording_info.get('recording_play_passcode', 'No password available.')
             }
 
             # Update share_details in meeting_summary
