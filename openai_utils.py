@@ -2,7 +2,8 @@
 
 import os
 import logging
-import openai
+from openai import OpenAI, APIConnectionError, APIStatusError, RateLimitError
+import json
 
 # Configure logging
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
@@ -21,25 +22,47 @@ if not OPENAI_API_KEY:
     logger.error("OPENAI_API_KEY is not set in environment variables.")
     raise EnvironmentError("OPENAI_API_KEY is required.")
 
-openai.api_key = OPENAI_API_KEY
+# Instantiate the OpenAI client
+openai_client = OpenAI(
+    api_key=OPENAI_API_KEY
+)
 
 def transcribe_audio(file_path):
     """
     Transcribes audio using OpenAI's Whisper API.
+    
+    Parameters:
+        file_path (str): The path to the audio file to transcribe.
+    
+    Returns:
+        str: The transcribed text or an empty string if transcription fails.
     """
     try:
         with open(file_path, "rb") as audio_file:
-            transcript = openai.Audio.transcribe("whisper-1", audio_file)
+            transcript_response = openai_client.audio.transcriptions.create(
+                file=audio_file,
+                model="whisper-1"  # Specify the appropriate model
+            )
+        transcript = transcript_response.text
         logger.info("Transcription successful.")
-        return transcript['text']
+        return transcript
+    except (APIConnectionError, RateLimitError, APIStatusError) as api_err:
+        logger.error(f"API error during transcription: {api_err}")
+        return ""
     except Exception as e:
-        logger.exception(f"Error transcribing audio: {e}")
+        logger.exception(f"Unexpected error during transcription: {e}")
         return ""
 
 def determine_slack_channel(meeting_topic, meeting_summary):
     """
     Determines the appropriate Slack channel to post the meeting summary to using OpenAI's ChatCompletion API.
-    Returns the Slack channel name as a string.
+    
+    Parameters:
+        meeting_topic (str): The topic of the meeting.
+        meeting_summary (dict): The meeting summary overview.
+    
+    Returns:
+        str: The Slack channel name (e.g., 'general', 'product-team').
     """
     try:
         prompt = (
@@ -48,7 +71,7 @@ def determine_slack_channel(meeting_topic, meeting_summary):
             f"Summary Overview: {meeting_summary.get('summary_overview', '')}\n\n"
             "Provide only the Slack channel name (e.g., general, product-team). If unsure, suggest 'general'."
         )
-        response = openai.ChatCompletion.create(
+        response = openai_client.chat.completions.create(
             model="gpt-4",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that categorizes information into public Slack channels."},
@@ -59,47 +82,65 @@ def determine_slack_channel(meeting_topic, meeting_summary):
             n=1,
             stop=["\n"]
         )
-        channel_name = response.choices[0].message['content'].strip().lower()
+        channel_name = response.choices[0].message.content.strip().lower()
         logger.info(f"Determined Slack channel: {channel_name}")
         return channel_name
+    except (APIConnectionError, RateLimitError, APIStatusError) as api_err:
+        logger.error(f"API error during Slack channel determination: {api_err}")
+        return "general"
     except Exception as e:
-        logger.exception(f"Error determining Slack channel: {e}")
+        logger.exception(f"Unexpected error during Slack channel determination: {e}")
         return "general"
 
-def generate_summary(transcript, meeting_title, host_email, meeting_id, meeting_date, meeting_time, participants, duration):
+def generate_summary(transcript, meeting_title, host_email, meeting_id, meeting_date, meeting_time, duration):
     """
     Generates a structured summary from the transcript using OpenAI's ChatCompletion API.
-    Returns a dictionary with 'meeting_details', 'share_details', 'meeting_summary'.
+    
+    Parameters:
+        transcript (str): The transcribed meeting audio.
+        meeting_title (str): The title of the meeting.
+        host_email (str): The host's email address.
+        meeting_id (str): The Zoom meeting ID.
+        meeting_date (str): The date of the meeting.
+        meeting_time (str): The time of the meeting.
+        duration (int): Duration of the meeting in minutes.
+    
+    Returns:
+        dict: A structured summary containing meeting details, share details, and meeting summary.
     """
     try:
         prompt = (
-            "You are an assistant that summarizes meeting transcripts into a structured format.\n\n"
-            "Please provide the summary in the following format:\n\n"
-            "1. **Meeting Title & Basic Details:**\n"
-            f"   - **Title:** {meeting_title}\n"
-            f"   - **Date & Time:** {meeting_date} at {meeting_time}\n"
-            f"   - **Host Email:** {host_email}\n"
-            f"   - **Meeting ID:** {meeting_id}\n\n"
-            "2. **Share Details:**\n"
-            f"   - **Play URL:** [Provide the Play URL]\n"
-            f"   - **Password:** [Provide the Password]\n\n"
-            "3. **Meeting Summary:**\n"
-            "   - **Brief Overview:** [Provide a brief overview]\n"
-            "   - **Main Topics Discussed:**\n"
-            "     - **Topic 1:** [Description] (Timestamp: [HH:MM])\n"
-            "     - **Topic 2:** [Description] (Timestamp: [HH:MM])\n"
-            "     - ...\n"
-            "   - **Action Items:**\n"
-            "     - **Action Item 1:** [Description] (Responsible: [Name])\n"
-            "     - **Action Item 2:** [Description] (Responsible: [Name])\n"
-            "     - ...\n\n"
-            "Participants:\n"
-            f"{', '.join(participants)}\n\n"
+            "You are an assistant that summarizes meeting transcripts into a structured JSON format.\n\n"
+            "Please provide the summary in the following JSON format:\n\n"
+            "{\n"
+            "  \"meeting_details\": {\n"
+            "    \"title\": \"\",\n"
+            "    \"date_time\": \"\",\n"
+            "    \"host_email\": \"\",\n"
+            "    \"meeting_id\": \"\",\n"
+            "    \"duration\": \"\"\n"
+            "  },\n"
+            "  \"share_details\": {\n"
+            "    \"play_url\": \"\",\n"
+            "    \"password\": \"\"\n"
+            "  },\n"
+            "  \"meeting_summary\": {\n"
+            "    \"summary_overview\": \"\",\n"
+            "    \"main_topics\": [\n"
+            "      {\"topic\": \"\", \"timestamp\": \"\"},\n"
+            "      ...\n"
+            "    ],\n"
+            "    \"action_items\": [\n"
+            "      {\"action_item\": \"\", \"responsible\": \"\"},\n"
+            "      ...\n"
+            "    ]\n"
+            "  }\n"
+            "}\n\n"
             "Transcript:\n"
             f"{transcript}\n\n"
-            "Please fill in the placeholders with appropriate content based on the transcript."
+            "Please ensure the JSON structure is followed precisely."
         )
-        response = openai.ChatCompletion.create(
+        response = openai_client.chat.completions.create(
             model="gpt-4",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that summarizes meeting transcripts."},
@@ -110,91 +151,29 @@ def generate_summary(transcript, meeting_title, host_email, meeting_id, meeting_
             n=1,
             stop=None
         )
-        summary_text = response.choices[0].message['content'].strip()
+        summary_text = response.choices[0].message.content.strip()
 
-        # Parse the summary into structured sections
-        meeting_details = {
+        # Parse the JSON response
+        summary_json = json.loads(summary_text)
+
+        # Add meeting details
+        summary_json['meeting_details'] = {
             "title": meeting_title,
             "date_time": f"{meeting_date} at {meeting_time}",
             "host_email": host_email,
             "meeting_id": meeting_id,
-            "participants": participants,
             "duration": duration
         }
 
-        # Initialize summary sections
-        summary_overview = ""
-        main_topics = []
-        action_items = ""
-        play_url = ""
-        password = ""
-
-        # Simple parsing logic based on section headers
-        lines = summary_text.split('\n')
-        current_section = None
-        current_subsection = None
-        for line in lines:
-            line = line.strip()
-            if line.startswith("1. **Meeting Title & Basic Details:**"):
-                current_section = "details"
-                continue
-            elif line.startswith("2. **Share Details:**"):
-                current_section = "share_details"
-                continue
-            elif line.startswith("3. **Meeting Summary:**"):
-                current_section = "summary"
-                continue
-
-            if current_section == "share_details":
-                if line.startswith("- **Play URL:**"):
-                    play_url = line.replace("- **Play URL:**", "").strip()
-                elif line.startswith("- **Password:**"):
-                    password = line.replace("- **Password:**", "").strip()
-            elif current_section == "summary":
-                if line.startswith("- **Brief Overview:**"):
-                    overview = line.replace("- **Brief Overview:**", "").strip()
-                    summary_overview = overview
-                elif line.startswith("- **Main Topics Discussed:**"):
-                    current_subsection = "main_topics"
-                elif line.startswith("- **Action Items:**"):
-                    current_subsection = "action_items"
-                elif line.startswith("- **") and current_subsection == "main_topics":
-                    # Extract topic and timestamp
-                    try:
-                        topic_part = line.split("**")[2]  # Extract text between second and third **
-                        desc_part = line.split("[Description]")[1].strip().strip("()")
-                        timestamp = desc_part.replace("Timestamp:", "").strip()
-                        main_topics.append({"topic": topic_part, "timestamp": timestamp})
-                    except IndexError:
-                        continue
-                elif line.startswith("- **") and current_subsection == "action_items":
-                    # Extract action item and responsible person
-                    try:
-                        action_part = line.split("**")[2]  # Extract text between second and third **
-                        resp_part = line.split("[Description]")[1].strip().strip("()").replace("Responsible:", "").strip()
-                        action_items += f"- **{action_part}** (Responsible: {resp_part})\n"
-                    except IndexError:
-                        continue
-
-        # Clean up the parsed sections
-        summary_overview = summary_overview.strip()
-        summary_details = ""
-        for topic in main_topics:
-            summary_details += f"- **{topic['topic']}** (Timestamp: {topic['timestamp']})\n"
-
         logger.info("Summary generation successful.")
-        return {
-            "meeting_details": meeting_details,
-            "share_details": {
-                "play_url": play_url,
-                "password": password
-            },
-            "meeting_summary": {
-                "summary_overview": summary_overview,
-                "main_topics": main_topics,
-                "action_items": action_items.strip()
-            }
-        }
+        return summary_json
+    except json.JSONDecodeError as json_err:
+        logger.error(f"JSON decode error during summary parsing: {json_err}")
+        logger.debug(f"Summary text: {summary_text}")
+        return {}
+    except (APIConnectionError, RateLimitError, APIStatusError) as api_err:
+        logger.error(f"API error during summary generation: {api_err}")
+        return {}
     except Exception as e:
-        logger.exception(f"Error generating summary: {e}")
+        logger.exception(f"Unexpected error during summary generation: {e}")
         return {}

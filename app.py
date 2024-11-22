@@ -6,8 +6,7 @@ from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from zoom_utils import (
     validate_zoom_webhook,
-    download_recording,
-    get_meeting_participants
+    download_recording
 )
 from slack_utils import get_channel_id, ensure_default_channel_exists, post_to_slack
 from openai_utils import (
@@ -114,15 +113,6 @@ def zoom_webhook():
                 meeting_date = "Unknown Date"
                 meeting_time = "Unknown Time"
 
-            # Handle participants extraction
-            participants_data = get_meeting_participants(meeting_id)
-            if participants_data:
-                participants = [participant['user_email'] for participant in participants_data if participant.get('user_email')]
-                if not participants:
-                    participants = ["Unknown Participant"]
-            else:
-                participants = ["Unknown Participant"]
-
             duration = recording_info.get('duration', 'Unknown Duration')
 
             # Download the recording using download_token
@@ -145,7 +135,6 @@ def zoom_webhook():
                 meeting_id=meeting_id,
                 meeting_date=meeting_date,
                 meeting_time=meeting_time,
-                participants=participants,
                 duration=duration
             )
             if not meeting_summary:
@@ -156,7 +145,6 @@ def zoom_webhook():
                         "date_time": f"{meeting_date} at {meeting_time}",
                         "host_email": host_email,
                         "meeting_id": meeting_id,
-                        "participants": participants,
                         "duration": duration
                     },
                     "share_details": {
@@ -193,7 +181,7 @@ def zoom_webhook():
                     logger.error("Failed to find or create the default Slack channel. Cannot post the meeting summary.")
                     return jsonify({'message': 'Failed to post the meeting summary to Slack.'}), 500
 
-            # Prepare the summary message
+            # Prepare the summary message using structured data
             summary = meeting_summary.get('meeting_summary', {})
             recording_summary = (
                 f"*Meeting Title & Basic Details:*\n"

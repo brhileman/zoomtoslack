@@ -4,7 +4,6 @@ import os
 import logging
 import requests
 import tempfile
-import urllib.parse
 import base64
 import time
 import hmac
@@ -111,32 +110,6 @@ def validate_zoom_webhook(signing_secret, signature, timestamp, payload):
         logger.exception(f"Error during Zoom webhook validation: {e}")
         return False
 
-def get_meeting_participants(meeting_id):
-    """
-    Fetches participants for a specific past meeting.
-    """
-    try:
-        # Double encode the UUID if necessary
-        if meeting_id.startswith("/") or "//" in meeting_id:
-            meeting_id = urllib.parse.quote(urllib.parse.quote(meeting_id, safe=''), safe='')
-
-        url = f"{ZOOM_API_BASE_URL}/past_meetings/{meeting_id}/participants"
-        params = {
-            "page_size": 30  # Adjust as needed
-        }
-        response = requests.get(url, headers=get_zoom_headers(), params=params)
-        response.raise_for_status()
-        data = response.json()
-        participants = data.get('participants', [])
-        logger.info(f"Fetched {len(participants)} participants for Meeting ID: {meeting_id}")
-        return participants
-    except requests.exceptions.HTTPError as http_err:
-        logger.error(f"HTTP error occurred: {http_err} - {response.text}")
-        return None
-    except Exception as e:
-        logger.exception(f"Unexpected error fetching participants: {e}")
-        return None
-
 def download_recording(download_url, download_token):
     """
     Downloads a recording from the provided download URL using the download token.
@@ -148,8 +121,9 @@ def download_recording(download_url, download_token):
         }
         response = requests.get(download_url, headers=headers, stream=True)
         response.raise_for_status()
-        # Save to a temporary file
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+        # Determine the file extension from the URL
+        file_extension = download_url.split('.')[-1].split('?')[0]  # Handles URLs with query params
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}")
         with open(temp_file.name, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
