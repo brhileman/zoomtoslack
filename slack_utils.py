@@ -76,3 +76,25 @@ def post_to_slack(channel_id, message):
     except Exception as e:
         logger.exception(f"Unexpected error posting message: {e}")
         return False
+
+def ensure_default_channel_exists(default_channel_name="bot-lost-meeting-recordings"):
+    """
+    Ensures that the default Slack channel exists. If it doesn't, attempts to create it.
+    Returns the channel ID if successful, else None.
+    """
+    channel_id = get_channel_id(default_channel_name)
+    if channel_id:
+        return channel_id
+    else:
+        # Attempt to create the channel
+        try:
+            response = client.conversations_create(name=default_channel_name)
+            channel = response['channel']
+            logger.info(f"Created Slack channel '{default_channel_name}' with ID: {channel['id']}")
+            return channel['id']
+        except SlackApiError as e:
+            logger.error(f"Error creating channel '{default_channel_name}': {e.response['error']}")
+            return None
+        except Exception as e:
+            logger.exception(f"Unexpected error creating channel '{default_channel_name}': {e}")
+            return None

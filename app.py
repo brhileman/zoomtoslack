@@ -20,6 +20,9 @@ import requests
 import openai
 import tempfile
 
+# Define the default Slack channel name
+DEFAULT_CHANNEL_NAME = "bot-lost-meeting-recordings"
+
 # Load environment variables from .env file only if not on Heroku
 if os.getenv('DYNO') is None:
     load_dotenv()
@@ -175,7 +178,7 @@ def zoom_webhook():
             if not channel_id:
                 logger.warning(f"Slack channel '{slack_channel}' not found. Attempting to post to default channel '{DEFAULT_CHANNEL_NAME}'.")
                 # Ensure default channel exists
-                channel_id = ensure_default_channel_exists()
+                channel_id = ensure_default_channel_exists(DEFAULT_CHANNEL_NAME)
                 if not channel_id:
                     logger.error("Failed to find or create the default Slack channel. Cannot post the meeting summary.")
                     return jsonify({'message': 'Failed to post the meeting summary to Slack.'}), 500
