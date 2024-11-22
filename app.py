@@ -7,8 +7,7 @@ from dotenv import load_dotenv
 from zoom_utils import (
     validate_zoom_webhook,
     download_recording,
-    get_meeting_participants,
-    get_zoom_headers  # This may not be needed anymore
+    get_meeting_participants
 )
 from slack_utils import get_channel_id, ensure_default_channel_exists, post_to_slack
 from openai_utils import (
@@ -16,9 +15,6 @@ from openai_utils import (
     generate_summary,
     determine_slack_channel
 )
-import requests
-import openai
-import tempfile
 import json
 
 # Define the default Slack channel name
@@ -72,6 +68,10 @@ def zoom_webhook():
             logger.warning("Unauthorized request: Validation failed.")
             return jsonify({'message': 'Unauthorized'}), 401
 
+        # **Log the sanitized payload for debugging**
+        sanitized_payload = sanitize_payload(data)
+        logger.debug(f"Received Zoom Webhook Payload: {sanitized_payload}")
+
         event = data.get('event')
         if event == 'recording.completed':
             recording_info = data['payload']['object']
@@ -87,14 +87,12 @@ def zoom_webhook():
             logger.info(f"Processing recording.completed event for Meeting ID: {meeting_id}")
 
             # Extract download_url and download_token directly from the webhook payload
-            # Depending on Zoom's webhook payload structure, adjust the keys accordingly
-            # Here's an example based on typical Zoom webhook payloads
             recording_files = recording_info.get('recording_files', [])
             if not recording_files:
                 logger.warning(f"No recordings found in webhook payload for Meeting ID: {meeting_id}")
                 return jsonify({'message': 'No recordings available in payload.'}), 200
 
-            # Iterate through recording files to find the desired one (e.g., video)
+            # Iterate through recording files to find the desired one (e.g., MP4)
             recording_url = None
             download_token = None
             for file in recording_files:
@@ -243,6 +241,22 @@ def zoom_webhook():
 @app.route('/', methods=['GET'])
 def index():
     return "The Zoom to Slack integration app is running successfully!", 200
+
+def sanitize_payload(payload):
+    """
+    Sanitizes the payload by redacting sensitive information.
+    Modify this function based on what needs to be sanitized.
+    """
+    sanitized = payload.copy()
+
+    # Example: Redact 'download_token' and 'download_url'
+    if 'recording_files' in sanitized['payload']['object']:
+        for file in sanitized['payload']['object']['recording_files']:
+            if 'download_token' in file:
+                file['download_token'] = 'REDACTED'
+            if 'download_url' in file:
+                file['download_url'] = 'REDACTED'
+    return sanitized
 
 if __name__ == '__main__':
     try:
