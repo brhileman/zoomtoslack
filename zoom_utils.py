@@ -9,6 +9,8 @@ import time
 import hmac
 import hashlib
 import json
+from urllib.parse import urlparse
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,9 @@ ZOOM_ACCESS_TOKEN = None
 ZOOM_TOKEN_EXPIRY = 0  # Unix timestamp
 
 def get_valid_zoom_access_token():
+    """
+    Retrieves a valid Zoom access token, refreshing it if necessary.
+    """
     global ZOOM_ACCESS_TOKEN, ZOOM_TOKEN_EXPIRY
     current_time = int(time.time())
     if not ZOOM_ACCESS_TOKEN or current_time >= ZOOM_TOKEN_EXPIRY:
@@ -66,6 +71,12 @@ def get_valid_zoom_access_token():
     return ZOOM_ACCESS_TOKEN
 
 def get_zoom_headers():
+    """
+    Constructs the headers required for Zoom API requests.
+    
+    Returns:
+        dict: Headers with Authorization and Content-Type.
+    """
     access_token = get_valid_zoom_access_token()
     if not access_token:
         logger.error("Unable to obtain valid Zoom access token.")
@@ -110,28 +121,80 @@ def validate_zoom_webhook(signing_secret, signature, timestamp, payload):
         logger.exception(f"Error during Zoom webhook validation: {e}")
         return False
 
+def is_valid_download_url(download_url):
+    """
+    Validates the structure of the download URL.
+    
+    Parameters:
+        download_url (str): The URL to validate.
+    
+    Returns:
+        bool: True if the URL is valid, False otherwise.
+    """
+    try:
+        parsed_url = urlparse(download_url)
+        return all([parsed_url.scheme, parsed_url.netloc, parsed_url.path])
+    except Exception as e:
+        logger.exception(f"Error parsing download URL '{download_url}': {e}")
+        return False
+
+@retry(
+    wait=wait_exponential(multiplier=1, min=4, max=10),
+    stop=stop_after_attempt(3),
+    retry=retry_if_exception_type(requests.exceptions.RequestException)
+)
 def download_recording(download_url, download_token):
     """
     Downloads a recording from the provided download URL using the download token.
+    Implements retry logic for transient network issues.
+    
+    Parameters:
+        download_url (str): The URL to download the recording from.
+        download_token (str): The token required for authorization.
+    
+    Returns:
+        str: The path to the downloaded recording file, or None if download fails.
     """
+    if not is_valid_download_url(download_url):
+        logger.error(f"Invalid download URL: {download_url}")
+        return None
+
     try:
         headers = {
             "Authorization": f"Bearer {download_token}",
             "Content-Type": "application/json"
         }
-        response = requests.get(download_url, headers=headers, stream=True)
+        response = requests.get(download_url, headers=headers, stream=True, timeout=30)
         response.raise_for_status()
-        # Determine the file extension from the URL
-        file_extension = download_url.split('.')[-1].split('?')[0]  # Handles URLs with query params
+        
+        # Safely determine the file extension from the URL
+        parsed_url = urlparse(download_url)
+        path = parsed_url.path  # e.g., /path/to/file.mp4
+        _, file_extension = os.path.splitext(path)
+        file_extension = file_extension.lstrip('.')  # Remove the leading dot
+        
+        # Fallback to a default extension if none found
+        if not file_extension:
+            file_extension = 'mp4'  # Default to mp4 or another appropriate format
+        
+        # Validate file extension against supported types
+        supported_extensions = ['mp4', 'm4a', 'mov']
+        if file_extension.lower() not in supported_extensions:
+            logger.warning(f"Unsupported file extension: .{file_extension}. Supported extensions are: {supported_extensions}.")
+            return None
+        
+        # Create a temporary file with the correct extension
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}")
         with open(temp_file.name, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
+                if chunk:  # Filter out keep-alive chunks
+                    f.write(chunk)
+        
         logger.info(f"Downloaded recording to {temp_file.name}")
         return temp_file.name
-    except requests.exceptions.HTTPError as http_err:
-        logger.error(f"HTTP error occurred while downloading recording: {http_err} - {response.text}")
-        return None
+    except requests.exceptions.RequestException as req_err:
+        logger.error(f"Network error occurred while downloading recording: {req_err}")
+        raise  # Trigger retry
     except Exception as e:
         logger.exception(f"Unexpected error downloading recording: {e}")
         return None
