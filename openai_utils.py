@@ -63,38 +63,58 @@ def determine_slack_channel(meeting_topic, meeting_summary, public_channels):
         public_channels (list of dict): List of public channels with 'name', 'topic', and 'id'.
     
     Returns:
-        str or None: The Slack channel ID (e.g., 'C1234567890'), or None if no suitable channel is found.
+        str or None: The Slack channel ID (e.g., 'C012AB3CD'), or None if no suitable channel is found.
     """
     try:
         # Prepare channel data for OpenAI prompt
         channel_info = "\n".join([f"- Name: {channel['name']}, Topic: {channel['topic']}" for channel in public_channels])
-
+        
         prompt = (
             "Based on the meeting topic and summary overview, determine the most appropriate Slack channel ID to post the meeting summary to.\n\n"
             f"Meeting Topic: {meeting_topic}\n"
             f"Summary Overview: {meeting_summary.get('summary_overview', '')}\n\n"
             "List of available Slack channels:\n"
             f"{channel_info}\n\n"
-            "Provide only the Slack channel ID (e.g., C1234567890). If no suitable channel is found, respond with 'None'."
+            "Provide only the Slack channel ID (e.g., C012AB3CD). If no suitable channel is found, respond with 'None'.\n\n"
+            "Examples:\n"
+            "- If the most appropriate channel is 'general' with ID 'C1234567890', respond with 'C1234567890'.\n"
+            "- If no suitable channel exists, respond with 'None'.\n\n"
         )
+        
         response = openai_client.chat.completions.create(
             model="gpt-4",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that categorizes information into Slack channels based on relevance."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=20,
-            temperature=0.3,
+            max_tokens=10,  # Reduced tokens since we expect a short response
+            temperature=0.0,  # Lower temperature for more deterministic output
             n=1,
             stop=["\n"]
         )
-        channel_id = response.choices[0].message.content.strip()
-        if channel_id.lower() == 'none':
+        
+        channel_id_raw = response.choices[0].message.content.strip()
+        
+        # Validate and extract the channel ID using regex
+        # Slack channel IDs start with 'C' followed by alphanumeric characters, typically 8 or more characters long
+        channel_id_match = re.match(r'^(C[A-Z0-9]{7,})$', channel_id_raw)
+        if channel_id_match:
+            channel_id = channel_id_match.group(1)
+            logger.info(f"Determined Slack channel ID: {channel_id}")
+            return channel_id
+        elif channel_id_raw.lower() == 'none':
             logger.info("No suitable Slack channel found by OpenAI.")
             return None
         else:
-            logger.info(f"Determined Slack channel ID: {channel_id}")
-            return channel_id
+            # Attempt to extract channel ID from a descriptive sentence
+            extracted_id = re.search(r'(C[A-Z0-9]{7,})', channel_id_raw)
+            if extracted_id:
+                channel_id = extracted_id.group(1)
+                logger.info(f"Extracted Slack channel ID from response: {channel_id}")
+                return channel_id
+            else:
+                logger.warning(f"Unexpected response format from OpenAI: '{channel_id_raw}'")
+                return None
     except (APIConnectionError, RateLimitError, APIStatusError) as api_err:
         logger.error(f"API error during Slack channel determination: {api_err}")
         return None
