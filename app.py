@@ -8,7 +8,7 @@ from zoom_utils import (
     validate_zoom_webhook,
     download_recording
 )
-from slack_utils import get_channel_id, ensure_default_channel_exists, post_to_slack
+from slack_utils import get_all_public_channels, ensure_default_channel_exists, join_slack_channel, post_to_slack
 from openai_utils import (
     transcribe_audio,
     generate_summary,
@@ -167,19 +167,23 @@ def zoom_webhook():
             # Update share_details in meeting_summary
             meeting_summary['share_details'] = share_details
 
-            # Determine Slack channel using OpenAI
-            slack_channel = determine_slack_channel(meeting_topic, meeting_summary.get('meeting_summary', {}))
-            logger.info(f"Determined Slack channel: {slack_channel}")
+            # Fetch all public channels from Slack
+            public_channels = get_all_public_channels()
 
-            # Get channel ID
-            channel_id = get_channel_id(slack_channel)
-            if not channel_id:
-                logger.warning(f"Slack channel '{slack_channel}' not found. Attempting to post to default channel '{DEFAULT_CHANNEL_NAME}'.")
-                # Ensure default channel exists
-                channel_id = ensure_default_channel_exists(DEFAULT_CHANNEL_NAME)
-                if not channel_id:
+            # Determine Slack channel using OpenAI
+            slack_channel_id = determine_slack_channel(meeting_topic, meeting_summary.get('meeting_summary', {}), public_channels)
+            if not slack_channel_id:
+                logger.warning(f"No suitable Slack channel found. Attempting to use default channel '{DEFAULT_CHANNEL_NAME}'.")
+                slack_channel_id = ensure_default_channel_exists(DEFAULT_CHANNEL_NAME)
+                if not slack_channel_id:
                     logger.error("Failed to find or create the default Slack channel. Cannot post the meeting summary.")
                     return jsonify({'message': 'Failed to post the meeting summary to Slack.'}), 500
+
+            # Join the Slack channel if not already a member
+            joined = join_slack_channel(slack_channel_id)
+            if not joined:
+                logger.error(f"Failed to join Slack channel ID '{slack_channel_id}'. Cannot post the meeting summary.")
+                return jsonify({'message': 'Failed to join Slack channel.'}), 500
 
             # Prepare the summary message using structured data
             summary = meeting_summary.get('meeting_summary', {})
@@ -207,11 +211,11 @@ def zoom_webhook():
                 recording_summary += f"  - **{action['action_item']}** (Responsible: {action['responsible']})\n"
 
             # Post to Slack
-            success = post_to_slack(channel_id, recording_summary)
+            success = post_to_slack(slack_channel_id, recording_summary)
             if success:
-                logger.info(f"Posted meeting summary to Slack channel ID '{channel_id}'.")
+                logger.info(f"Posted meeting summary to Slack channel ID '{slack_channel_id}'.")
             else:
-                logger.error(f"Failed to post meeting summary to Slack channel ID '{channel_id}'.")
+                logger.error(f"Failed to post meeting summary to Slack channel ID '{slack_channel_id}'.")
 
             # Clean up the downloaded recording file
             try:

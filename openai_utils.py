@@ -53,44 +53,54 @@ def transcribe_audio(file_path):
         logger.exception(f"Unexpected error during transcription: {e}")
         return ""
 
-def determine_slack_channel(meeting_topic, meeting_summary):
+def determine_slack_channel(meeting_topic, meeting_summary, public_channels):
     """
     Determines the appropriate Slack channel to post the meeting summary to using OpenAI's ChatCompletion API.
     
     Parameters:
         meeting_topic (str): The topic of the meeting.
         meeting_summary (dict): The meeting summary overview.
+        public_channels (list of dict): List of public channels with 'name', 'topic', and 'id'.
     
     Returns:
-        str: The Slack channel name (e.g., 'general', 'product-team').
+        str or None: The Slack channel ID (e.g., 'C1234567890'), or None if no suitable channel is found.
     """
     try:
+        # Prepare channel data for OpenAI prompt
+        channel_info = "\n".join([f"- Name: {channel['name']}, Topic: {channel['topic']}" for channel in public_channels])
+
         prompt = (
-            "Based on the meeting topic and summary overview, determine the most appropriate public Slack channel to post the meeting summary to.\n\n"
+            "Based on the meeting topic and summary overview, determine the most appropriate Slack channel ID to post the meeting summary to.\n\n"
             f"Meeting Topic: {meeting_topic}\n"
             f"Summary Overview: {meeting_summary.get('summary_overview', '')}\n\n"
-            "Provide only the Slack channel name (e.g., general, product-team). If unsure, suggest 'general'."
+            "List of available Slack channels:\n"
+            f"{channel_info}\n\n"
+            "Provide only the Slack channel ID (e.g., C1234567890). If no suitable channel is found, respond with 'None'."
         )
         response = openai_client.chat.completions.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant that categorizes information into public Slack channels."},
+                {"role": "system", "content": "You are a helpful assistant that categorizes information into Slack channels based on relevance."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=10,
+            max_tokens=20,
             temperature=0.3,
             n=1,
             stop=["\n"]
         )
-        channel_name = response.choices[0].message.content.strip().lower()
-        logger.info(f"Determined Slack channel: {channel_name}")
-        return channel_name
+        channel_id = response.choices[0].message.content.strip()
+        if channel_id.lower() == 'none':
+            logger.info("No suitable Slack channel found by OpenAI.")
+            return None
+        else:
+            logger.info(f"Determined Slack channel ID: {channel_id}")
+            return channel_id
     except (APIConnectionError, RateLimitError, APIStatusError) as api_err:
         logger.error(f"API error during Slack channel determination: {api_err}")
-        return "general"
+        return None
     except Exception as e:
         logger.exception(f"Unexpected error during Slack channel determination: {e}")
-        return "general"
+        return None
 
 def generate_summary(transcript, meeting_title, host_email, meeting_id, meeting_date, meeting_time, duration):
     """
