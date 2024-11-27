@@ -93,7 +93,7 @@ def determine_slack_channel(meeting_topic, meeting_summary, public_channels):
             n=1,
             stop=["\n"]
         )
-        
+        logger.info(f"Raw response from GPT4 matching: {response}")
         channel_id_raw = response.choices[0].message.content.strip()
         
         # Validate and extract the channel ID using regex
