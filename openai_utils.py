@@ -4,6 +4,7 @@ import os
 import logging
 from openai import OpenAI, APIConnectionError, APIStatusError, RateLimitError
 import json
+import re
 
 # Configure logging
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
